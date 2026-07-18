@@ -1,3 +1,4 @@
-name = "test-abbas-123"
+# wrangler.toml
+name = 'absh-nerkh'
 main = "Full-codes.js"
 compatibility_date = "2024-12-18"
