@@ -1,257 +1,272 @@
-// ============================================================
-// ربات تلگرام - نرخ طلا و ارز (Cloudflare Workers)
-// ============================================================
+'use strict';
 
-export default {
-  async fetch(request, env) {
-    // توکن ربات را از environment variables دریافت کنید
-    const API_KEY = env.TELEGRAM_BOT_TOKEN; // نام متغیر در Cloudflare Dashboard
+const TELEGRAM_API_BASE = 'https://api.telegram.org/bot';
+const PRICE_API_URL = 'https://webservice.lorddeveloper.ir/arz/';
+const FETCH_TIMEOUT = 10000; // 10 seconds
 
-    // فقط درخواست‌های POST (webhook) را پردازش می‌کنیم
-    if (request.method !== 'POST') {
-      return new Response('Only POST requests are accepted', { status: 405 });
-    }
-
-    try {
-      const update = await request.json();
-      await handleTelegramUpdate(update, API_KEY);
-      return new Response('OK', { status: 200 });
-    } catch (error) {
-      console.error('Error processing update:', error);
-      return new Response('Internal Server Error', { status: 500 });
-    }
+function getApiKey(env) {
+  const key = env.TELEGRAM_BOT_TOKEN;
+  if (!key) {
+    console.error('TELEGRAM_BOT_TOKEN is not set in environment variables.');
+    throw new Error('Token not configured');
   }
-};
-
-// ------------------------------------------------------------
-// پردازشگر اصلی آپدیت‌های تلگرام
-// ------------------------------------------------------------
-async function handleTelegramUpdate(update, API_KEY) {
-  // استخراج اطلاعات از آپدیت
-  const message = update.message;
-  const callbackQuery = update.callback_query;
-  const inlineQuery = update.inline_query;
-
-  // اگر پیام متنی باشد
-  if (message && message.text) {
-    const chatId = message.chat.id;
-    const text = message.text;
-    const firstName = message.from.first_name || 'کاربر';
-
-    // دریافت قیمت‌ها از API (هر بار درخواست جدید)
-    const prices = await fetchPrices();
-
-    if (text === '/start') {
-      await sendMessage(API_KEY, chatId, `
-سلام ${firstName} عزیز 😃
-📶 به ربات نرخ لحظه‌ای طلا و ارز و... خوش آمدید
-🌟 به وسیله این ربات میتونی از آخرین قیمت‌های دلار و ارزهای مختلف و کلی چیزای دیگه مطلع بشی
-🎈 برای شروع کافیه از دکمه‌های زیر استفاده کنی
-      `, {
-        reply_markup: {
-          keyboard: [
-            [{ text: '💶 قیمت ارز' }],
-            [{ text: '🏵 قیمت طلا' }, { text: '💰 قیمت سکه' }]
-          ],
-          resize_keyboard: true
-        }
-      });
-    }
-    else if (text === '💶 قیمت ارز') {
-      const currencyText = buildCurrencyText(prices);
-      await sendMessage(API_KEY, chatId, currencyText, {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: '🌟 اشتراک', switch_inline_query: '' }]
-          ]
-        }
-      });
-    }
-    else if (text === '🏵 قیمت طلا') {
-      const goldText = buildGoldText(prices);
-      await sendMessage(API_KEY, chatId, goldText, {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: '🌟 اشتراک', switch_inline_query: '' }]
-          ]
-        }
-      });
-    }
-    else if (text === '💰 قیمت سکه') {
-      const coinText = buildCoinText(prices);
-      await sendMessage(API_KEY, chatId, coinText, {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: '🌟 اشتراک', switch_inline_query: '' }]
-          ]
-        }
-      });
-    }
-    // سایر پیام‌ها را نادیده بگیرید
-  }
-
-  // اگر inline query باشد
-  else if (inlineQuery) {
-    const inlineQueryId = inlineQuery.id;
-    const prices = await fetchPrices();
-    const currencyText = buildCurrencyText(prices);
-    const goldText = buildGoldText(prices);
-    const coinText = buildCoinText(prices);
-
-    const results = [
-      {
-        type: 'article',
-        id: btoa(String(Math.random() * 1000)),
-        thumb_url: 'https://tlgur.com/d/BgvOnAb4',
-        title: 'ارسال نرخ ارز',
-        description: 'ارسال نرخ ارز به این چت',
-        input_message_content: {
-          parse_mode: 'html',
-          message_text: currencyText
-        },
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: '🔹 ورود به ربات', url: 'https://t.me/my_test_ro_bot' }],
-            [{ text: '🌟 اشتراک', switch_inline_query: '' }]
-          ]
-        }
-      },
-      {
-        type: 'article',
-        id: btoa(String(Math.random() * 1000)),
-        thumb_url: 'https://tlgur.com/d/BgvOnAb4',
-        title: 'ارسال نرخ طلا',
-        description: 'ارسال نرخ طلا به این چت',
-        input_message_content: {
-          parse_mode: 'html',
-          message_text: goldText
-        },
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: '🔹 ورود به ربات', url: 'https://t.me/my_test_ro_bot' }],
-            [{ text: '🌟 اشتراک', switch_inline_query: '' }]
-          ]
-        }
-      },
-      {
-        type: 'article',
-        id: btoa(String(Math.random() * 1000)),
-        thumb_url: 'https://tlgur.com/d/BgvOnAb4',
-        title: 'ارسال نرخ سکه',
-        description: 'ارسال نرخ سکه به این چت',
-        input_message_content: {
-          parse_mode: 'html',
-          message_text: coinText
-        },
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: '🔹 ورود به ربات', url: 'https://t.me/my_test_ro_bot' }],
-            [{ text: '🌟 اشتراک', switch_inline_query: '' }]
-          ]
-        }
-      }
-    ];
-
-    await answerInlineQuery(API_KEY, inlineQueryId, results);
-  }
-
-  // callback_query را در صورت نیاز می‌توانید پردازش کنید (فعلاً خالی)
-  // else if (callbackQuery) { ... }
+  return key;
 }
 
-// ------------------------------------------------------------
-// توابع کمکی برای دریافت قیمت‌ها از API
-// ------------------------------------------------------------
-async function fetchPrices() {
-  const url = 'http://webservice.lorddeveloper.ir/arz/';
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch prices: ${response.status}`);
+async function fetchWithTimeout(url, options = {}, timeout = FETCH_TIMEOUT) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    clearTimeout(timeoutId);
+    return response;
+  } catch (error) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      throw new Error(`Request to ${url} timed out after ${timeout}ms`);
+    }
+    throw error;
   }
-  const data = await response.json();
+}
+
+async function telegramApiCall(method, body, token) {
+  const url = `${TELEGRAM_API_BASE}${token}/${method}`;
+  const res = await fetchWithTimeout(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const errorText = await res.text();
+    console.error(`Telegram API HTTP error ${res.status} for ${method}:`, errorText);
+    throw new Error(`Telegram API HTTP ${res.status}`);
+  }
+
+  const data = await res.json();
+  console.log(`Telegram API response ${method}:`, JSON.stringify(data));
+
+  if (!data.ok) {
+    console.error(`Telegram API logical error for ${method}:`, JSON.stringify(data));
+    throw new Error(`Telegram API error: ${data.description || 'Unknown error'}`);
+  }
+
+  return data.result;
+}
+
+async function sendMessage(chatId, text, replyMarkup, token) {
+  const body = {
+    chat_id: chatId,
+    text,
+    parse_mode: 'HTML',
+  };
+  if (replyMarkup) {
+    body.reply_markup = replyMarkup;
+  }
+  return telegramApiCall('sendMessage', body, token);
+}
+
+async function answerInlineQuery(inlineQueryId, results, token) {
+  const body = {
+    inline_query_id: inlineQueryId,
+    results,
+    cache_time: 0,
+  };
+  return telegramApiCall('answerInlineQuery', body, token);
+}
+
+async function fetchPriceData() {
+  const res = await fetchWithTimeout(PRICE_API_URL);
+  if (!res.ok) {
+    throw new Error(`Price API returned ${res.status}`);
+  }
+  const data = await res.json();
   return data;
 }
 
-// ------------------------------------------------------------
-// توابع ساخت متن‌ها
-// ------------------------------------------------------------
-function buildCurrencyText(p) {
-  const c = p.currency;
-  return `💵 قیمت ارز های کشور های مختلف:
-🇺🇸 دلار: ${c.dollar}
-🇪🇺 یورو : ${c.euro}
-🇬🇧 یوند : ${c.pound}
-🇦🇪 درهم : ${c.AED}
-🇯🇵 ین : ${c.yen}
-🇹🇷 لیر ترکیه : ${c.turkish_lira}
-🇨🇳 یوان چین : ${c.chinese_yuan}
-🇨🇦 دلار کانادا : ${c.canadian_dollar}
-🇦🇺 دلار استرلیا : ${c.australian_dollar}
-🇳🇿 دلار نیوزلند :${c.newzealand_dollar}
-🇸🇪 کرون سوئد : ${c.swedish_krona}
-🇩🇰 کرون دانمارک : ${c.danish_krona}
-🇳🇴 کرون نروژ : ${c.norwegian_krona}
-🇰🇼 دینار کویت : ${c.kuwaiti_dinar}
-🇸🇦 ریال عربستان : ${c.arabian_rial}
-🇶🇦 ریال قطر : ${c.qatar_rial}
-🇮🇶 دینار عراق : ${c.iraqi_dinar}
-🇸🇾 لیر سوریه : ${c.syrian_lair}
-🇮🇳 روپیه هندوستان : ${c.indian_rupee}
-🇵🇰 روپیه پاکستان : ${c.pakistani_rupee}
-🇧🇭 دینار بحرین : ${c.bahrain_dinar}
-🇷🇺 روبل روسیه : ${c.russian_ruble}
-🇦🇿 منات اذربایجان : ${c.azerbaijani_manat}
-🇦🇲 درام ارمنستان : ${c.armenian_drama}
-🇹🇭 بات تایلند : ${c.thai_baht}
-🇭🇰 دلار هنگ کنگ : ${c.hongkong_dollar}`;
+function extractItems(data, category) {
+  // This helper tries to find the relevant array/object for currencies, gold, coins.
+  // First, check if response has a "data" wrapper (common for lorddeveloper.ir)
+  if (data && data.data && typeof data.data === 'object') {
+    const inner = data.data;
+    if (category === 'currencies') {
+      if (Array.isArray(inner.currencies)) return inner.currencies;
+      if (inner.currencies && typeof inner.currencies === 'object') return Object.values(inner.currencies);
+    }
+    if (category === 'gold') {
+      if (Array.isArray(inner.gold)) return inner.gold;
+      if (inner.gold && typeof inner.gold === 'object') return Object.values(inner.gold);
+    }
+    if (category === 'coins') {
+      if (Array.isArray(inner.coins)) return inner.coins;
+      if (inner.coins && typeof inner.coins === 'object') return Object.values(inner.coins);
+    }
+    // If not found under expected keys, try generic scan
+    const items = [];
+    for (const [key, value] of Object.entries(inner)) {
+      if (typeof value === 'object' && value !== null && value.name && value.price) {
+        if (category === 'currencies' && key.includes('curr')) items.push(value);
+        else if (category === 'gold' && (key.includes('gold') || key.includes('طلا'))) items.push(value);
+        else if (category === 'coins' && (key.includes('coin') || key.includes('سکه'))) items.push(value);
+      }
+    }
+    if (items.length > 0) return items;
+  }
+
+  // Fallback: data itself might be an array or object with items
+  if (Array.isArray(data)) return data;
+
+  if (data && typeof data === 'object') {
+    // Possibly flat structure like { usd: { name, price }, ... }
+    const items = [];
+    for (const [key, value] of Object.entries(data)) {
+      if (typeof value === 'object' && value !== null && value.price) {
+        items.push(value);
+      }
+    }
+    if (items.length > 0) return items;
+  }
+
+  return [];
 }
 
-function buildGoldText(p) {
-  return `💵 قیمت طلا: 
-📍 یک انس طلا: ${p.gold.ounce}
-📍 یک مثقال طلا: ${p.gold.gold}
-📍 طلا 18 عیار: ${p.gold.gold_18}
-📍 طلا 24 عیار: ${p.gold.gold_24}
-📍 نقره: ${p.gold.silver}`;
+function formatCurrency(rawData) {
+  const items = extractItems(rawData, 'currencies');
+  if (items.length === 0) return 'اطلاعات ارز در دسترس نیست.';
+  const lines = items.map(item => `${item.name || 'نامشخص'}: ${item.price || '---'}`);
+  return '💶 <b>قیمت ارز</b>\n\n' + lines.join('\n');
 }
 
-function buildCoinText(p) {
-  return `💵 قیمت سکه: 
-📍 سکه بهار آزادی: ${p.coin.gold_coin}
-📍 سکه امامی: ${p.coin.emami_coin}
-📍 نیم سکه: ${p.coin.half_coin}
-📍 ربع سکه: ${p.coin.quarter_coin}
-📍 سکه گرمی: ${p.coin.gramme_coin}`;
+function formatGold(rawData) {
+  const items = extractItems(rawData, 'gold');
+  if (items.length === 0) return 'اطلاعات طلا در دسترس نیست.';
+  const lines = items.map(item => `${item.name || 'نامشخص'}: ${item.price || '---'}`);
+  return '🏵 <b>قیمت طلا</b>\n\n' + lines.join('\n');
 }
 
-// ------------------------------------------------------------
-// توابع ارسال درخواست به API تلگرام
-// ------------------------------------------------------------
-async function sendMessage(apiKey, chatId, text, extra = {}) {
-  const url = `https://api.telegram.org/bot${apiKey}/sendMessage`;
-  const payload = {
-    chat_id: chatId,
-    text: text,
-    parse_mode: 'html',
-    ...extra
+function formatCoin(rawData) {
+  const items = extractItems(rawData, 'coins');
+  if (items.length === 0) return 'اطلاعات سکه در دسترس نیست.';
+  const lines = items.map(item => `${item.name || 'نامشخص'}: ${item.price || '---'}`);
+  return '💰 <b>قیمت سکه</b>\n\n' + lines.join('\n');
+}
+
+async function handleStart(chatId, userFirstName, token) {
+  const welcomeText = `سلام ${userFirstName} عزیز 😃\n\n📶 به ربات نرخ لحظه‌ای طلا و ارز خوش آمدید.\nاز دکمه‌های زیر استفاده کنید.`;
+  const keyboard = {
+    keyboard: [
+      [{ text: '💶 قیمت ارز' }],
+      [{ text: '🏵 قیمت طلا' }, { text: '💰 قیمت سکه' }],
+    ],
+    resize_keyboard: true,
+    one_time_keyboard: false,
   };
-  await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
+  await sendMessage(chatId, welcomeText, keyboard, token);
 }
 
-async function answerInlineQuery(apiKey, inlineQueryId, results) {
-  const url = `https://api.telegram.org/bot${apiKey}/answerInlineQuery`;
-  const payload = {
-    inline_query_id: inlineQueryId,
-    results: results,
-    cache_time: 0
-  };
-  await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
+async function handlePriceRequest(chatId, text, token) {
+  let data;
+  try {
+    data = await fetchPriceData();
+  } catch (err) {
+    console.error('Failed to fetch price data:', err);
+    await sendMessage(chatId, 'متأسفانه در دریافت اطلاعات خطایی رخ داد. لطفاً بعداً تلاش کنید.', null, token);
+    return;
+  }
+  let message;
+  if (text === '💶 قیمت ارز') {
+    message = formatCurrency(data);
+  } else if (text === '🏵 قیمت طلا') {
+    message = formatGold(data);
+  } else if (text === '💰 قیمت سکه') {
+    message = formatCoin(data);
+  } else {
+    return;
+  }
+  await sendMessage(chatId, message, null, token);
 }
+
+async function handleMessage(message, token) {
+  const chatId = message.chat.id;
+  const text = message.text || '';
+  if (text.startsWith('/start')) {
+    const firstName = message.from.first_name || 'کاربر';
+    await handleStart(chatId, firstName, token);
+  } else if (text === '💶 قیمت ارز' || text === '🏵 قیمت طلا' || text === '💰 قیمت سکه') {
+    await handlePriceRequest(chatId, text, token);
+  }
+}
+
+async function handleInlineQuery(inlineQuery, token) {
+  const queryId = inlineQuery.id;
+  let currencyText = 'خطا در دریافت اطلاعات ارز';
+  let goldText = 'خطا در دریافت اطلاعات طلا';
+  let coinText = 'خطا در دریافت اطلاعات سکه';
+  try {
+    const data = await fetchPriceData();
+    currencyText = formatCurrency(data);
+    goldText = formatGold(data);
+    coinText = formatCoin(data);
+  } catch (err) {
+    console.error('Inline price fetch error:', err);
+  }
+  const results = [
+    {
+      type: 'article',
+      id: '1',
+      title: '💶 نرخ ارز',
+      input_message_content: {
+        message_text: currencyText,
+        parse_mode: 'HTML',
+      },
+    },
+    {
+      type: 'article',
+      id: '2',
+      title: '🏵 نرخ طلا',
+      input_message_content: {
+        message_text: goldText,
+        parse_mode: 'HTML',
+      },
+    },
+    {
+      type: 'article',
+      id: '3',
+      title: '💰 نرخ سکه',
+      input_message_content: {
+        message_text: coinText,
+        parse_mode: 'HTML',
+      },
+    },
+  ];
+  await answerInlineQuery(queryId, results, token);
+}
+
+async function handleUpdate(update, env) {
+  const token = getApiKey(env);
+  if (update.message) {
+    await handleMessage(update.message, token);
+  } else if (update.inline_query) {
+    await handleInlineQuery(update.inline_query, token);
+  }
+}
+
+export default {
+  async fetch(request, env) {
+    if (request.method !== 'POST') {
+      return new Response('Method Not Allowed', { status: 405 });
+    }
+    try {
+      if (!env.TELEGRAM_BOT_TOKEN) {
+        console.error('Missing TELEGRAM_BOT_TOKEN environment variable.');
+        return new Response('Server configuration error', { status: 500 });
+      }
+      const body = await request.json();
+      await handleUpdate(body, env);
+      return new Response('OK', { status: 200 });
+    } catch (err) {
+      console.error('Unhandled worker error:', err);
+      return new Response('Internal Server Error', { status: 500 });
+    }
+  },
+};
